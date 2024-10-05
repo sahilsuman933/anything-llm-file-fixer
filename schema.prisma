@@ -1,0 +1,26 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model file {
+  id                 String   @id
+  storageKey         String   @unique
+  url                String
+  pageContentUrl     String?
+  title              String
+  docAuthor          String
+  description        String
+  docSource          String
+  chunkSource        String
+  published          DateTime
+  wordCount          Int?
+  tokenCountEstimate Int?
+  folderId           String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime
+}
