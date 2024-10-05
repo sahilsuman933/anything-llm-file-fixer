@@ -143,12 +143,12 @@ async function processFile(file) {
 
         break;
       } else if (jobStatus === 'FAILED') {
-        logger.error(`Textract job failed for file ${file.id}`);
+        logger.error(`Textract job failed for file ${file.id}, File might be broken.`);
         return;
       }
     }
   } catch (error) {
-    logger.error(`Error processing file ${file.id}: ${error.message}, File might be broken.`);
+    logger.error(`Error processing file ${file.id}: ${error.message}`);
   }
 }
 
