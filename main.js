@@ -66,50 +66,87 @@ async function processFile(file) {
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
     };
-    const s3Data = await s3.getObject(s3Params).promise();
-    const fileData = s3Data.Body;
-    const fileSize = s3Data.ContentLength;
-    logger.info(`Downloaded file from S3: ${file.url}, size: ${fileSize} bytes`);
-
     const originalFileName = path.basename(key);
     const fileNameWithoutExt = originalFileName.replace(path.extname(originalFileName), '');
 
-    if (fileSize > 5 * 1024 * 1024) {
-      logger.error(`File ${file.id} exceeds the 5 MB limit for synchronous Textract operations.`);
-      return;
-    }
+    logger.info(`Using asynchronous Textract API for file: ${file.title}`);
 
     const textractParams = {
-      Document: {
-        Bytes: fileData,
+      DocumentLocation: {
+        S3Object: {
+          Bucket: process.env.S3_BUCKET_NAME,
+          Name: key,
+        },
       },
     };
-    const textractResponse = await textract.detectDocumentText(textractParams).promise();
-    const textBlocks = textractResponse.Blocks.filter((block) => block.BlockType === 'LINE');
-    const content = textBlocks.map((block) => block.Text).join('\n');
-    logger.info(`Extracted text from file using Textract`);
 
-    const textFileKey = `pageContents/${fileNameWithoutExt}.txt`;
-    const uploadParams = {
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key: textFileKey,
-      Body: content,
-      ContentType: 'text/plain',
-    };
-    await s3.putObject(uploadParams).promise();
+    const startResponse = await textract.startDocumentTextDetection(textractParams).promise();
+    const jobId = startResponse.JobId;
+    logger.info(`Started Textract job with JobId: ${jobId}`);
 
-    const pageContentUploadUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
-    logger.info(`Uploaded text file to S3: ${pageContentUploadUrl}`);
+    let jobStatus = 'IN_PROGRESS';
+    while (jobStatus === 'IN_PROGRESS' || jobStatus === 'SUCCEEDED') {
+      await new Promise((resolve) => setTimeout(resolve, 5000)); 
+      const getJobStatusParams = {
+        JobId: jobId,
+      };
+      const jobStatusResponse = await textract.getDocumentTextDetection(getJobStatusParams).promise();
+      jobStatus = jobStatusResponse.JobStatus;
+      logger.info(`Textract Job Status: ${jobStatus}`);
 
-    await prisma.file.update({
-      where: { id: file.id },
-      data: {
-        pageContentUrl: pageContentUploadUrl,
-        wordCount: content.split(' ').length,
-        tokenCountEstimate: tokenizeString(content).length,
-      },
-    });
-    logger.info(`Updated file record in database: ${file.id}`);
+      if (jobStatus === 'SUCCEEDED') {
+        let content = '';
+        let blocks = jobStatusResponse.Blocks;
+
+        content += blocks
+          .filter((block) => block.BlockType === 'LINE')
+          .map((block) => block.Text)
+          .join('\n');
+
+        let nextToken = jobStatusResponse.NextToken;
+        while (nextToken) {
+          const nextPageParams = {
+            JobId: jobId,
+            NextToken: nextToken,
+          };
+          const nextPageResponse = await textract.getDocumentTextDetection(nextPageParams).promise();
+          blocks = nextPageResponse.Blocks;
+          content += '\n' + blocks
+            .filter((block) => block.BlockType === 'LINE')
+            .map((block) => block.Text)
+            .join('\n');
+          nextToken = nextPageResponse.NextToken;
+        }
+        logger.info(`Extracted text from file using Textract asynchronous API`);
+
+        const textFileKey = `pageContents/${fileNameWithoutExt}.txt`;
+        const uploadParams = {
+          Bucket: process.env.S3_BUCKET_NAME,
+          Key: textFileKey,
+          Body: content,
+          ContentType: 'text/plain',
+        };
+        await s3.putObject(uploadParams).promise();
+
+        const pageContentUploadUrl = `https://${uploadParams.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${uploadParams.Key}`;
+        logger.info(`Uploaded text file to S3: ${pageContentUploadUrl}`);
+
+        await prisma.file.update({
+          where: { id: file.id },
+          data: {
+            pageContentUrl: pageContentUploadUrl,
+            wordCount: content.split(' ').length,
+            tokenCountEstimate: tokenizeString(content).length,
+          },
+        });
+        logger.info(`Updated file record in database: ${file.id}`);
+
+        break;
+      } else if (jobStatus === 'FAILED') {
+        logger.error(`Textract job failed for file ${file.id}`);
+        return;
+      }
+    }
   } catch (error) {
     logger.error(`Error processing file ${file.id}: ${error.message}`);
   }
@@ -118,13 +155,14 @@ async function processFile(file) {
 async function main() {
   try {
     const files = await prisma.file.findMany({
-      where: { pageContentUrl: null },
+      where: { pageContentUrl: null},
     });
 
     logger.info(`Found ${files.length} files to process`);
 
     for (const file of files) {
       await processFile(file);
+      break;
     }
 
     logger.info(`Processing complete`);
