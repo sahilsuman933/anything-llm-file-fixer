@@ -143,26 +143,29 @@ async function processFile(file) {
 
         break;
       } else if (jobStatus === 'FAILED') {
-        logger.error(`Textract job failed for file ${file.id}, File might be broken.`);
+        logger.error(`Textract job failed for file ${file.id}`);
         return;
       }
     }
   } catch (error) {
-    logger.error(`Error processing file ${file.id}: ${error.message}`);
+    logger.error(`Error processing file ${file.id}: ${error.message}, File might be broken.`);
   }
 }
 
 async function main() {
   try {
     const files = await prisma.file.findMany({
-      where: { pageContentUrl: null},
+      where: { pageContentUrl: null },
     });
 
     logger.info(`Found ${files.length} files to process`);
 
     for (const file of files) {
-      await processFile(file);
-      break;
+      try {
+        await processFile(file);
+      } catch (error) {
+        logger.error(`Error processing file ${file.id}: ${error.message}`);
+      }
     }
 
     logger.info(`Processing complete`);
