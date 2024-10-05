@@ -69,7 +69,7 @@ async function processFile(file) {
     const originalFileName = path.basename(key);
     const fileNameWithoutExt = originalFileName.replace(path.extname(originalFileName), '');
 
-    logger.info(`Using asynchronous Textract API for file: ${file.title}`);
+    logger.info(`Using asynchronous Textract API for file: ${file.title} | ${file.url}`);
 
     const textractParams = {
       DocumentLocation: {
@@ -143,7 +143,7 @@ async function processFile(file) {
 
         break;
       } else if (jobStatus === 'FAILED') {
-        logger.error(`Textract job failed for file ${file.id}`);
+        logger.error(`Textract job failed for file ${file.id}, File might be broken.`);
         return;
       }
     }
