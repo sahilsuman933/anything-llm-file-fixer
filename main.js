@@ -118,14 +118,13 @@ async function processFile(file) {
 async function main() {
   try {
     const files = await prisma.file.findMany({
-      where: { pageContentUrl: null, id: "1aa1f31f-34bd-46e7-8f29-0cf2d06cbf03" },
+      where: { pageContentUrl: null },
     });
 
     logger.info(`Found ${files.length} files to process`);
 
     for (const file of files) {
       await processFile(file);
-      break;
     }
 
     logger.info(`Processing complete`);
