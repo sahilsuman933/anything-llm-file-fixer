@@ -7,9 +7,9 @@ const { v4: uuidv4 } = require('uuid');
 const winston = require('winston');
 const { Logtail } = require('@logtail/node');
 const { LogtailTransport } = require('@logtail/winston');
+const pLimit = require('p-limit');
 
 const prisma = new PrismaClient();
-
 AWS.config.update({
   region: process.env.AWS_REGION,
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -160,13 +160,19 @@ async function main() {
 
     logger.info(`Found ${files.length} files to process`);
 
-    for (const file of files) {
-      try {
-        await processFile(file);
-      } catch (error) {
-        logger.error(`Error processing file ${file.id}: ${error.message}`);
-      }
-    }
+    const limit = pLimit(20); 
+
+    const filePromises = files.map((file) =>
+      limit(async () => {
+        try {
+          await processFile(file);
+        } catch (error) {
+          logger.error(`Error processing file ${file.id}: ${error.message}`);
+        }
+      })
+    );
+
+    await Promise.all(filePromises);
 
     logger.info(`Processing complete`);
   } catch (error) {
